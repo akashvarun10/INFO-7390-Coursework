@@ -1,47 +1,59 @@
-from dotenv import load_dotenv
-load_dotenv()
-import os
-
 import streamlit as st
-import google.generativeai as genai
+import os
+from groq import Groq
+import random
 
-api_key=os.getenv("GOOGLE_API_KEY")
+from langchain.chains import ConversationChain
+from langchain.chains.conversation.memory import ConversationBufferWindowMemory
+from langchain_groq import ChatGroq
+from langchain.prompts import PromptTemplate
+from dotenv import load_dotenv
+import os 
 
-genai.configure(api_key=api_key)
+load_dotenv()
 
-## function to load Gemini Pro model and get response
-model = genai.GenerativeModel("gemini-pro")
-chat = model.start_chat(history=[])
+groq_api_key = os.getenv("GROQ_API_KEY")
 
-def get_gemini_response(question):
-    respone = chat.send_message(question,stream=True)
-    return respone
+def main():
 
-#initialize streamlit app 
+    st.title("Groq Chat App")
 
-st.set_page_config(page_title="Q&A Demo")
-st.header ("Gemini LLM Application")
-# Initialize session state for chat history if it doesn't exist
-if 'chat_history' not in st.session_state:
-    st.session_state[ 'chat_history'] = []
+    # Add customization options to the sidebar
+    st.sidebar.title('Select an LLM')
+    model = st.sidebar.selectbox(
+        'Choose a model',
+        ['mixtral-8x7b-32768', 'llama2-70b-4096']
+    )
+    conversational_memory_length = st.sidebar.slider('Conversational memory length:', 1, 10, value = 5)
 
+    memory=ConversationBufferWindowMemory(k=conversational_memory_length)
 
-input=st. text_input ("Input:", key="input")
-submit = st.button("Ask the Question")
+    user_question = st.text_area("Ask a question:")
 
-if submit and input:
-    response = get_gemini_response(input)
-    ## add user query and response to chat history
-    st.session_state['chat_history'].append(("You", input))
-    st.subheader("Gemini's Response:")
-    for chunk in response:
-        st.write(chunk.text)
-        st.session_state['chat_history'].append(("Bot", chunk.text))
-
-st.subheader("Chat History : ")
-
-for role,text in st.session_state['chat_history']:
-    if role=="You":
-        st.write(f"You: {text}")
+    # session state variable
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history=[]
     else:
-        st.write(f"Bot: {text}")
+        for message in st.session_state.chat_history:
+            memory.save_context({'input':message['human']},{'output':message['AI']})
+
+
+    # Initialize Groq Langchain chat object and conversation
+    groq_chat = ChatGroq(
+            groq_api_key=groq_api_key, 
+            model_name=model
+    )
+
+    conversation = ConversationChain(
+            llm=groq_chat,
+            memory=memory
+    )
+
+    if user_question:
+        response = conversation(user_question)
+        message = {'human':user_question,'AI':response['response']}
+        st.session_state.chat_history.append(message)
+        st.write("Chatbot:", response['response'])
+
+if __name__ == "__main__":
+    main()
